@@ -4,6 +4,9 @@ import torch.nn.functional as F
 from torchvision import transforms
 import timm
 
+def get_efficient_net():
+    return torch.hub.load('NVIDIA/DeepLearningExamples:torchhub', 'nvidia_efficientnet_b0', pretrained=True)
+
 class EfficientNetBackbone(nn.Module):
     """Pretrained EfficientNet backbone adapted for grayscale images"""
     def __init__(self, model_name='efficientnet_b0', input_channels=1, freeze=True):
@@ -159,30 +162,23 @@ if __name__ == "__main__":
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = SegmentationModel(backbone_name='efficientnet_b0', num_classes=3, input_channels=1).to(device)
+    # Unfreeze the backbone from the start for fine-tuning
+    model.unfreeze_backbone(n_layers=len(list(model.backbone.model.children())))
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
     criterion = nn.CrossEntropyLoss()
 
-    # Training loop
+    # Training loop (fine-tuning from the start)
     model.train()
-    for epoch in range(10):
+    for epoch in range(15):
+        running_loss = 0.0
         for images, masks in train_loader:
             images, masks = images.to(device), masks.to(device)
             outputs = model(images)
+            outputs = torch.nn.functional.interpolate(outputs, size=masks.shape[1:], mode='bilinear', align_corners=False)
             loss = criterion(outputs, masks)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        print(f"Epoch {epoch+1}, Loss: {loss.item():.4f}")
-
-    # Fine-tune
-    model.unfreeze_backbone(n_layers=15)
-    optimizer = optim.Adam(model.parameters(), lr=1e-5)
-    for epoch in range(5):
-        for images, masks in train_loader:
-            images, masks = images.to(device), masks.to(device)
-            outputs = model(images)
-            loss = criterion(outputs, masks)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-        print(f"Fine-tune Epoch {epoch+1}, Loss: {loss.item():.4f}")
+            running_loss += loss.item() * images.size(0)
+        avg_loss = running_loss / len(train_loader.dataset)
+        print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f}")
