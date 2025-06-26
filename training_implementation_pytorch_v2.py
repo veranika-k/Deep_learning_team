@@ -205,15 +205,49 @@ if __name__ == "__main__":
     losses = []
     for epoch in range(15):
         running_loss = 0.0
-        for images, masks in train_loader:
+        
+        for batch_idx, (images, masks) in enumerate(train_loader):
             images, masks = images.to(device), masks.to(device)
             outputs = model(images)
             outputs = torch.nn.functional.interpolate(outputs, size=masks.shape[1:], mode='bilinear', align_corners=False)
+
             loss = criterion(outputs, masks)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             running_loss += loss.item() * images.size(0)
+
+            # Save predictions for the first batch of each epoch
+            if batch_idx == 0:
+                preds = torch.argmax(outputs, dim=1).cpu().numpy()
+                masks_np = masks.cpu().numpy()
+                imgs_np = images.cpu().numpy()
+
+                for i in range(min(4, images.size(0))):  # Save up to 4 images
+                    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+
+                    # Input image (grayscale)
+                    axes[0].imshow(imgs_np[i][0], cmap='gray')
+                    axes[0].set_title("Input Image")
+                    axes[0].axis('off')
+
+                    # Ground truth mask
+                    axes[1].imshow(masks_np[i], cmap='nipy_spectral', vmin=0, vmax=model.decoder.classifier.out_channels - 1)
+                    axes[1].set_title("Ground Truth")
+                    axes[1].axis('off')
+
+                    # Predicted mask
+                    axes[2].imshow(preds[i], cmap='nipy_spectral', vmin=0, vmax=model.decoder.classifier.out_channels - 1)
+                    axes[2].set_title("Prediction")
+                    axes[2].axis('off')
+
+                    filename = f"output_predictions/epoch_{epoch+1:02d}_img_{i}_comparison.png"
+                    plt.savefig(filename, bbox_inches='tight')
+                    plt.close(fig)
+
+    avg_loss = running_loss / len(train_loader.dataset)
+    print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f}")
+    losses.append(avg_loss)
         avg_loss = running_loss / len(train_loader.dataset)
         print(f"Epoch {epoch+1} | Loss: {avg_loss:.4f}")
         losses.append(avg_loss)
